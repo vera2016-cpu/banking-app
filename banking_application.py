@@ -79,11 +79,11 @@ def sign_up():
             
             user = cursor.fetchone()
 
-            if user is None:
-                break
-            else:
-                print("Username is empty.")
+            if user is not None:
+                print("User already exists.")
                 continue
+            else:
+                break
 
     while True:
         password1 = getpass("Enter your password: ").strip()
@@ -169,6 +169,8 @@ def get_account_number():
     return account_number
        
 
+
+
 def log_in():
     print("*********************************Login************************************")
     while True:
@@ -202,8 +204,11 @@ def log_in():
                 print("Invalid credentials")  
                 return
             print("Log In Successful")
-            deposit()
+            home_page(user[3])
     
+
+
+
 
 def deposit(account_number):
 
@@ -242,7 +247,11 @@ def deposit(account_number):
             break 
         except ValueError:
                 print("Please enter a valid amount.")
-        withdrawal()
+        home_page(account_number)
+
+
+
+
 
 def withdrawal(account_number):
 
@@ -262,7 +271,7 @@ def withdrawal(account_number):
             with sqlite3.connect(DB_FILE) as conn:
                     cursor = conn.cursor()
                     # Get users current balance
-                    cursor.execute("SELECT balance FROM users WHERE account_number = ?", (account_number,))
+                    cursor.execute("SELECT current_balance FROM users WHERE account_number = ?", (account_number,))
                     result = cursor.fetchone()
 
                     if result is None:
@@ -272,27 +281,33 @@ def withdrawal(account_number):
                     current_balance = result[0]
 
                     if withdrawal_amount > current_balance:
-                        print("Insufficient fund. Your current balance is #{current_balance:.2f}")
+                        print(f"Insufficient fund. Your current balance is #{current_balance:.2f}.")
+                        continue
 
-                        new_balance =current_balance - withdrawal_amount
-                        # update balance
-                        cursor.execute("""
-                        UPDATE users
-                        SET balance = ?
-                        WHERE account_number = ?
-                    """, (new_balance, account_number))
-                        
-                        # --- Record transaction ---
-                        cursor.execute("""INSERT INTO transactions (account_number, type, amount) VALUES (?, 'withdraw', ?)""", (account_number, withdrawal_amount))
+                    new_balance =current_balance - withdrawal_amount
+                    # update balance
+                    cursor.execute("""
+                    UPDATE users
+                    SET current_balance = ?
+                    WHERE account_number = ?
+                """, (new_balance, account_number))
+                    
+                    # --- Record transaction ---
+                    cursor.execute("""INSERT INTO transactions (account_number, type, amount) VALUES (?, 'withdraw', ?)""", (account_number, withdrawal_amount))
                     conn.commit()
-
+                    print('Withdrawing...')
+                    time.sleep(5)
                     print(f"Withdrawal of ₦{withdrawal_amount:.2f} successful!")
                     print(f"New balance: ₦{new_balance:.2f}")
                     break 
          
         except ValueError:
             print("Please enter a valid amount.")
-            view_transaction_history()
+            home_page(account_number)
+
+
+
+
 
 def view_transaction_history(account_number):
     with sqlite3.connect(DB_FILE) as conn:
@@ -310,45 +325,60 @@ def view_transaction_history(account_number):
         if not transactions:
             print("No transactions found for this account.")
         else:
-            print("\n=== Transaction History ===")
+            print(" ********Transaction History **********")
             print(f"{'Type':<15}{'Amount':<12}{'Date'}")
             print("-" * 45)
             for t_type, amount, date in transactions:
                 print(f"{t_type:<15}₦{amount:<10.2f}{date}")
             print("-" * 45) 
-            transfer()
+            home_page(account_number)
+
+
+
 
 def transfer(sender_account):
+    while True:
+        recipient = input("Enter the recipient's account number: ").strip()
+        # validate recipient
+        if recipient == "":
+            print("Recipient account number cannot be blank.")
+            continue
+        
+        if not recipient.isdigit():
+            print("Account number must contain only digits.")
+            continue
 
-    recipient = input("Enter the recipient's account number: ").strip()
-    # validate recipient
-    if recipient == "":
-        print("Recipient account number cannot be blank.")
-        return
+        if int(recipient) == sender_account:
+            print("You cannot transfer money to your own account.")
+            continue
+        
     
-    if not recipient.isdigit():
-        print("Account number must contain only digits.")
-        return
-    
-    if recipient == sender_account:
-        print("You cannot transfer money to your own account.")
-        return
-    
-    
-    amount = input("Enter the amount you want to transfer: ").strip()
+        with sqlite3.connect(DB_FILE) as conn:
+            cursor = conn.cursor()
+            # check if recipient exist
+            cursor.execute("SELECT account_number FROM users WHERE account_number = ?", (recipient,))
+            recipient_result = cursor.fetchone()
+            
+            if not recipient_result:
+                print("account does not exist")
+                continue
+        
+        amount = input("Enter the amount you want to transfer: ").strip()
 
-    if amount =="":
-        print("Amount cannot be blank.")
-        return
-    
-    try:
-        amount = float(amount)
-    except ValueError:
-        print("Please enter a valid numeric amount.")
+        if amount =="":
+            print("Amount cannot be blank.")
+            return
+        
+        try:
+            amount = float(amount)
+        except ValueError:
+            print("Please enter a valid numeric amount.")
+            return
 
-    if amount < 0:
-        print("Transfer amount cannot be negative.")
-        # perform transfer
+        if amount < 0:
+            print("Transfer amount cannot be negative.")
+            return
+            # perform transfer
         with sqlite3.connect(DB_FILE) as conn:
             cursor = conn.cursor()
             # check if recipient exist
@@ -360,9 +390,9 @@ def transfer(sender_account):
             return
         
             # check sender balance
-        cursor.execute("SELECT balance FROM users WHERE account_number = ?", (sender_account,))
+        cursor.execute("SELECT current_balance FROM users WHERE account_number = ?", (sender_account,))
         sender_data = cursor.fetchone()
-
+        print(sender_data)
         if not sender_data:
             print("Sender account not found.")
             return
@@ -374,37 +404,95 @@ def transfer(sender_account):
             print(f"Insufficient funds. Your current balance is ₦{sender_balance:.2f}.")
             return
         
-        # --- Update balances ---
-        new_sender_balance = sender_balance - amount
-        new_recipient_balance = recipient_result[0] + amount
+        # # --- Update balances ---
+        # new_sender_balance = sender_balance - amount
+        # new_recipient_balance = recipient_result[0] + amount
 
         # --- Perform Transfer ---
-        cursor.execute("UPDATE users SET balance = balance - ? WHERE account_number = ?", (new_sender_balance, sender_account))
-        cursor.execute("UPDATE users SET balance = balance + ? WHERE account_number = ?", (new_recipient_balance, recipient))
+        cursor.execute("UPDATE users SET current_balance = current_balance - ? WHERE account_number = ?", (amount, sender_account))
+        cursor.execute("UPDATE users SET current_balance = current_balance + ? WHERE account_number = ?", (amount, recipient))
 
         # Record transactions
-        cursor.execute("INSERT INTO transactions (account_number, type, amount) VALUES (?, 'transfer_out', ?)",
+        cursor.execute("INSERT INTO transactions (account_number, type, amount) VALUES (?, 'transfer_sent', ?)",
                         (sender_account, amount))
-        cursor.execute("INSERT INTO transactions (account_number, type, amount) VALUES (?, 'transfer_in', ?)",
+        cursor.execute("INSERT INTO transactions (account_number, type, amount) VALUES (?, 'transfer_received', ?)",
                         (recipient, amount))
 
         conn.commit()
+        print("Transfering....")
+        time.sleep(5)
 
         print(f"Transfer of ₦{amount:.2f} to account {recipient} was successful!")
-
-        
-
+        home_page(sender_account)
 
 
 
 
-        
 
-
-
+def check_balance(account_number):
+    with sqlite3.connect(DB_FILE) as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT current_balance, account_number
+            FROM users
+            WHERE account_number = ?
+        """, (account_number,))
     
+        user = cursor.fetchone()
+        print('Account balance: ', user[0])
 
 
 
 
-sign_up()
+
+
+def home_page(account_number):
+    print("************************HOME PAGE**************************")
+    menu = """
+1. Deposit
+2. Withdraw
+3. Transfer
+4. Check Balance
+5. Transaction History
+6. Quit
+"""
+    while True:
+        print(menu)
+        choice = input("Choose an option from the menu above: ").strip()
+
+        if choice == "1":
+            deposit(account_number)
+        elif choice == "2":
+            withdrawal(account_number)
+        elif choice == "3":
+            transfer(account_number)
+        elif choice == "4":
+            check_balance(account_number)
+        elif choice == "5":
+            view_transaction_history(account_number)
+        elif choice == "6":
+            print("Returning to the main menu...")
+            break
+        else:
+            print("Invalid choice. Please select between 1 and 6.")
+            continue
+
+menu = """
+1. Sign Up
+2. Log In
+3. Quit
+"""
+
+print("Welcome to DammieBank")
+while True:
+    print("************************MAIN MENU**************************")
+    print(menu)
+    choice = input("Choose an option from the menu above: ").strip()
+
+    if choice == "1":
+        sign_up()
+    elif choice == "2":
+        log_in()
+    elif choice == "3":
+        print("Exiting DammieBank...")
+        break
